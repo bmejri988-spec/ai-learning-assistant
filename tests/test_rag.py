@@ -1,70 +1,66 @@
+from io import BytesIO
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from backend.main import app
-from backend.modules.rag.service import RagIngestionService
+from backend.modules.rag.loader import load_pdf_text
+from backend.modules.rag.pipeline import RagPipeline
+from backend.modules.rag.splitter import split_text
 
 
 client = TestClient(app)
 
 
-def test_rag_splitter_creates_chunks() -> None:
-    service = RagIngestionService()
-    chunks = service._split_text("This is a long sentence. " * 80)
+def _build_test_pdf(text: str) -> bytes:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=300, height=300)
 
-    assert chunks
-    assert all(chunk for chunk in chunks)
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }
+    )
+    font_ref = writer._add_object(font)
 
+    resources = DictionaryObject({NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})})
+    page[NameObject("/Resources")] = resources
 
-def test_rag_ingestion_persists_chunks(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("backend.modules.rag.service.VECTOR_DB_PATH", str(tmp_path / "vector_store"))
+    content = DecodedStreamObject()
+    content.set_data(f"BT /F1 12 Tf 72 150 Td ({text}) Tj ET".encode("utf-8"))
+    page[NameObject("/Contents")] = writer._add_object(content)
 
-    service = RagIngestionService()
-    monkeypatch.setattr(service, "_extract_pdf_text", lambda _: "alpha beta gamma delta " * 120)
-
-    class FakeEmbedder:
-        def encode(self, texts, normalize_embeddings=True):
-            return [[float(index + 1), 0.0, 0.0] for index, _ in enumerate(texts)]
-
-    monkeypatch.setattr(service, "_get_embedder", lambda: FakeEmbedder())
-
-    result = service.ingest_pdf("notes.pdf", b"%PDF-1.4 fake")
-
-    assert result["document_name"] == "notes.pdf"
-    assert result["chunks"] > 0
-    assert service._collection.count() == result["chunks"]
-    assert (tmp_path / "vector_store").exists()
+    buffer = BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
 
 
-def test_rag_upload_route_uses_ingestion_service(tmp_path, monkeypatch) -> None:
-    class FakeService:
-        def ingest_pdf(self, document_name: str, pdf_bytes: bytes):
-            assert document_name == "sample.pdf"
-            assert pdf_bytes == b"%PDF-1.4 fake"
-            return {"document_name": document_name, "chunks": 2, "vector_db_path": str(tmp_path)}
-
-    app.dependency_overrides.clear()
-    from backend.modules.rag.service import get_rag_ingestion_service
-
-    app.dependency_overrides[get_rag_ingestion_service] = lambda: FakeService()
+def test_rag_upload_route_saves_pdf_and_returns_success(tmp_path, monkeypatch) -> None:
+    upload_dir = tmp_path / "uploads"
+    monkeypatch.setattr("backend.config.UPLOADS_DIR", str(upload_dir))
+    monkeypatch.setattr("backend.modules.rag.uploads.UPLOADS_DIR", str(upload_dir))
 
     response = client.post(
         "/rag/upload",
         files={"file": ("sample.pdf", b"%PDF-1.4 fake", "application/pdf")},
     )
 
-    app.dependency_overrides.clear()
+    saved_file = upload_dir / "sample.pdf"
 
     assert response.status_code == 200
     assert response.json() == {
         "success": True,
-        "message": "PDF indexed",
-        "data": {"document_name": "sample.pdf", "chunks": 2, "vector_db_path": str(tmp_path)},
+        "message": "PDF uploaded",
+        "data": {"file_name": "sample.pdf", "saved_path": str(saved_file)},
     }
+    assert saved_file.exists()
 
 
-def test_rag_upload_rejects_non_pdf() -> None:
+def test_rag_upload_route_rejects_non_pdf() -> None:
     response = client.post(
         "/rag/upload",
         files={"file": ("notes.txt", b"hello", "text/plain")},
@@ -72,6 +68,54 @@ def test_rag_upload_rejects_non_pdf() -> None:
 
     assert response.status_code == 400
     assert response.json() == {"success": False, "message": "Only PDF files are supported"}
+
+
+def test_rag_loader_extracts_text(tmp_path) -> None:
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(_build_test_pdf("Test document text"))
+
+    extracted_text = load_pdf_text(pdf_path)
+
+    assert "Test document text" in extracted_text
+
+
+def test_rag_splitter_reports_chunk_stats() -> None:
+    result = split_text("alpha beta gamma delta " * 80)
+
+    assert result.count > 0
+    assert result.average_chunk_size > 0
+
+
+def test_rag_pipeline_indexes_pdf_without_llm(tmp_path, monkeypatch) -> None:
+    pdf_path = tmp_path / "sample.pdf"
+    pdf_path.write_bytes(_build_test_pdf("alpha beta gamma delta " * 120))
+
+    pipeline = RagPipeline()
+
+    class FakeEmbeddings:
+        def embed_documents(self, docs):
+            return [[float(index + 1), 0.0, 0.0] for index, _ in enumerate(docs)]
+
+    class FakeCollection:
+        def __init__(self) -> None:
+            self.documents = []
+
+        def add(self, ids, documents, embeddings, metadatas):
+            self.documents.extend(documents)
+
+        def count(self):
+            return len(self.documents)
+
+    fake_collection = FakeCollection()
+    monkeypatch.setattr("backend.modules.rag.pipeline.get_embedding_model", lambda: FakeEmbeddings())
+    monkeypatch.setattr("backend.modules.rag.pipeline.get_collection", lambda: fake_collection)
+
+    result = pipeline.index_pdf(pdf_path)
+
+    assert result["document_name"] == "sample.pdf"
+    assert result["chunks"] > 0
+    assert result["embedding_dimension"] == 3
+    assert result["stored_documents"] == result["chunks"]
 
 
 def test_rag_route_appears_in_openapi_and_docs() -> None:

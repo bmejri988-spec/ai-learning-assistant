@@ -6,3 +6,4 @@ __pycache__/
 .env
 data/vector_store/
 data/app.db
+data/uploads/
