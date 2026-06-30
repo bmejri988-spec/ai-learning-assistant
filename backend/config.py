@@ -1,2 +1,13 @@
-PROJECT_NAME = "AI Learning Assistant API"
-PROJECT_VERSION = "0.2.0"
+from os import getenv
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+PROJECT_NAME = getenv("PROJECT_NAME", "AI Learning Assistant API")
+PROJECT_VERSION = getenv("PROJECT_VERSION", "0.3.0")
+LOG_LEVEL = getenv("LOG_LEVEL", "INFO")
+OPENAI_API_KEY = getenv("OPENAI_API_KEY", "")
+MODEL_NAME = getenv("MODEL_NAME", "")
+VECTOR_DB_PATH = getenv("VECTOR_DB_PATH", "data/vector_store")
+DATABASE_PATH = getenv("DATABASE_PATH", "data/app.db")

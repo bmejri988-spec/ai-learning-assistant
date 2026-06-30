@@ -10,3 +10,9 @@ dependencies = [
     "pydantic",
     "python-dotenv",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "httpx2",
+]
