@@ -16,6 +16,11 @@ app.include_router(text_router)
 app.include_router(ml_router)
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    return {"message": "AI Learning Assistant API"}
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "healthy"}

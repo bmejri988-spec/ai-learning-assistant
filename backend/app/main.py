@@ -1,8 +1,3 @@
-from fastapi import FastAPI
+from backend.main import app
 
-app = FastAPI(title="AI Learning Assistant API")
-
-
-@app.get("/")
-def root() -> dict[str, str]:
-    return {"message": "AI Learning Assistant API"}
+__all__ = ["app"]
