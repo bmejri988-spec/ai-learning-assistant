@@ -1,0 +1,2 @@
+PROJECT_NAME = "AI Learning Assistant API"
+PROJECT_VERSION = "0.2.0"
