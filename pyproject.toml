@@ -6,6 +6,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi",
+    "chromadb",
+    "pypdf",
+    "python-multipart",
+    "sentence-transformers",
     "uvicorn[standard]",
     "pydantic",
     "python-dotenv",
