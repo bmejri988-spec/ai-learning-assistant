@@ -7,6 +7,7 @@ Step 1 scaffold for the AI Learning Assistant project.
 - Backend API foundation with modular routing
 - RAG ingestion pipeline for PDF upload, text extraction, chunking, embeddings, and Chroma storage
 - Retrieval engine with `/rag/retrieve`
+- Retrieval study with real PDF measurements in [docs/rag-retrieval-study.md](docs/rag-retrieval-study.md)
 
 ## RAG Notes
 
@@ -35,4 +36,4 @@ Open http://localhost:8000 to see the API response.
 
 ## Evaluate Retrieval
 
-The earlier static evaluation scaffold was removed so the repository stays focused on real PDF ingestion and retrieval. Use the API docs and the test suite for validation until a real benchmark corpus is ready.
+The earlier static evaluation scaffold was removed so the repository stays focused on real PDF ingestion and retrieval. Use the API docs, the test suite, and the retrieval study note for validation.
