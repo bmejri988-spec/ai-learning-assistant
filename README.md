@@ -10,8 +10,8 @@ Step 1 scaffold for the AI Learning Assistant project.
 
 ## RAG Notes
 
-- Put real PDFs in the system by uploading them through `POST /rag/upload` in the API docs, or by saving them into `data/uploads/` during local experiments.
-- Uploaded PDFs are stored in `data/uploads/`, and indexed chunks live in `data/vector_store/`.
+- Put real PDFs in the system by uploading them through `POST /rag/upload` in the API docs; that saves the file in `data/uploads/` and indexes it into `data/vector_store/`.
+- During local experiments, you can also place PDFs in `data/uploads/` and index them through the pipeline.
 - The retrieval path uses top-k similarity search over ChromaDB.
 - Retrieval tests pass with the `all-MiniLM-L6-v2` embedding model.
 - See GitHub issue #1 for the LangChain deprecation follow-up

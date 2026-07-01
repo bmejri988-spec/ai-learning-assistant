@@ -8,6 +8,7 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from backend.main import app
 from backend.modules.rag.loader import load_pdf_text
 from backend.modules.rag.pipeline import RagPipeline
+from backend.modules.rag.pipeline import get_rag_pipeline
 from backend.modules.rag.splitter import split_text
 
 
@@ -44,18 +45,45 @@ def test_rag_upload_route_saves_pdf_and_returns_success(tmp_path, monkeypatch) -
     monkeypatch.setattr("backend.config.UPLOADS_DIR", str(upload_dir))
     monkeypatch.setattr("backend.modules.rag.uploads.UPLOADS_DIR", str(upload_dir))
 
+    class FakePipeline:
+        def index_pdf(self, pdf_path):
+            assert pdf_path.name == "sample.pdf"
+            return {
+                "document_name": pdf_path.name,
+                "extracted_text_length": 16,
+                "chunks": 1,
+                "average_chunk_size": 16.0,
+                "embedding_dimension": 3,
+                "vector_count": 1,
+                "stored_documents": 1,
+            }
+
+    app.dependency_overrides[get_rag_pipeline] = lambda: FakePipeline()
+
     response = client.post(
         "/rag/upload",
         files={"file": ("sample.pdf", b"%PDF-1.4 fake", "application/pdf")},
     )
+
+    app.dependency_overrides.clear()
 
     saved_file = upload_dir / "sample.pdf"
 
     assert response.status_code == 200
     assert response.json() == {
         "success": True,
-        "message": "PDF uploaded",
-        "data": {"file_name": "sample.pdf", "saved_path": str(saved_file)},
+        "message": "PDF uploaded and indexed",
+        "data": {
+            "file_name": "sample.pdf",
+            "saved_path": str(saved_file),
+            "document_name": "sample.pdf",
+            "extracted_text_length": 16,
+            "chunks": 1,
+            "average_chunk_size": 16.0,
+            "embedding_dimension": 3,
+            "vector_count": 1,
+            "stored_documents": 1,
+        },
     }
     assert saved_file.exists()
 
