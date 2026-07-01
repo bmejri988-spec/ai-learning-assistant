@@ -16,3 +16,4 @@ RAG_EMBEDDING_MODEL = getenv("RAG_EMBEDDING_MODEL", "sentence-transformers/all-M
 RAG_CHUNK_SIZE = int(getenv("RAG_CHUNK_SIZE", "1000"))
 RAG_CHUNK_OVERLAP = int(getenv("RAG_CHUNK_OVERLAP", "150"))
 UPLOADS_DIR = getenv("UPLOADS_DIR", "data/uploads")
+RAG_DEFAULT_TOP_K = int(getenv("RAG_DEFAULT_TOP_K", "3"))

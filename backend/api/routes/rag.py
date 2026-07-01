@@ -1,9 +1,16 @@
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 
 from backend.api.utils.responses import success_response
 from backend.modules.rag.uploads import save_uploaded_pdf
+from backend.modules.rag.retriever import RagRetriever, get_rag_retriever
 
 router = APIRouter(prefix="/rag", tags=["rag"])
+
+
+class RetrievalRequest(BaseModel):
+    query: str = Field(min_length=1, description="Question to search against the knowledge base")
+    top_k: int = Field(default=3, ge=1, le=10)
 
 
 @router.get("/ask")
@@ -21,3 +28,12 @@ async def upload_pdf(
     pdf_bytes = await file.read()
     saved_path = save_uploaded_pdf(file.filename, pdf_bytes)
     return success_response("PDF uploaded", {"file_name": saved_path.name, "saved_path": str(saved_path)})
+
+
+@router.post("/retrieve")
+def retrieve_documents(
+    payload: RetrievalRequest,
+    retriever: RagRetriever = Depends(get_rag_retriever),
+) -> dict[str, object]:
+    result = retriever.retrieve(payload.query, payload.top_k)
+    return success_response("Retrieved documents", result)
