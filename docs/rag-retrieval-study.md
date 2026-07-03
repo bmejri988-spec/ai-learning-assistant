@@ -29,10 +29,10 @@ This note captures the real-PDF retrieval checks performed on `artificial_intell
 ## Measured Results
 
 | Chunk size | Overlap | Chunks | Avg. chunk size | Ingest time | Direct AI query time | Direct AI top score | Synonym query top score |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 300 | 75 | 404 | 299.36 | 13.21 s | 12.11 ms | 0.8221 | 0.7740 |
-| 500 | 100 | 227 | 499.44 | 9.94 s | 11.48 ms | 0.8116 | 0.7818 |
-| 800 | 150 | 140 | 797.50 | 9.91 s | 17.62 ms | 0.7215 | 0.7477 |
+| ---------- | ------- | -----: | --------------: | ----------: | -------------------: | ------------------: | ----------------------: |
+| 300        | 75      |    404 |          299.36 |     13.21 s |             12.11 ms |              0.8221 |                  0.7740 |
+| 500        | 100     |    227 |          499.44 |      9.94 s |             11.48 ms |              0.8116 |                  0.7818 |
+| 800        | 150     |    140 |          797.50 |      9.91 s |             17.62 ms |              0.7215 |                  0.7477 |
 
 ## Takeaway
 

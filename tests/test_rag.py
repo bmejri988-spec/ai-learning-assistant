@@ -7,8 +7,7 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from backend.main import app
 from backend.modules.rag.loader import load_pdf_text
-from backend.modules.rag.pipeline import RagPipeline
-from backend.modules.rag.pipeline import get_rag_pipeline
+from backend.modules.rag.pipeline import RagAnswerPipeline, RagPipeline, get_rag_answer_pipeline, get_rag_pipeline
 from backend.modules.rag.splitter import split_text
 
 
@@ -153,3 +152,36 @@ def test_rag_route_appears_in_openapi_and_docs() -> None:
     assert docs_response.status_code == 200
     assert openapi_response.status_code == 200
     assert "/rag/upload" in openapi_response.json()["paths"]
+
+
+def test_rag_ask_route_generates_answer(tmp_path) -> None:
+    class FakeAnswerPipeline:
+        def answer_question(self, question: str, top_k: int = 3):
+            assert question == "What is Artificial Intelligence?"
+            assert top_k == 3
+            return {
+                "answer": "Artificial Intelligence is the science of making intelligent machines.",
+                "sources": [
+                    {
+                        "chunk_number": 1,
+                        "metadata": {"document_name": "sample.pdf", "chunk_index": 0},
+                        "distance": 0.12,
+                        "score": 0.88,
+                    }
+                ],
+                "retrieved_documents": 1,
+            }
+
+    app.dependency_overrides[get_rag_answer_pipeline] = lambda: FakeAnswerPipeline()
+
+    response = client.post(
+        "/rag/ask",
+        json={"question": "What is Artificial Intelligence?", "top_k": 3},
+    )
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert response.json()["data"]["answer"]
+    assert response.json()["data"]["sources"][0]["chunk_number"] == 1

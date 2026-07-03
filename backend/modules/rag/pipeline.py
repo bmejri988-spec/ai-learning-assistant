@@ -8,6 +8,9 @@ from fastapi import HTTPException
 
 from backend.modules.rag.embeddings import get_embedding_model
 from backend.modules.rag.loader import load_pdf_text
+from backend.modules.rag.llm import get_rag_llm
+from backend.modules.rag.prompt import get_rag_prompt_builder
+from backend.modules.rag.retriever import RagRetriever, get_rag_retriever
 from backend.modules.rag.splitter import split_text
 from backend.modules.rag.vectordb import get_collection
 
@@ -55,3 +58,52 @@ class RagPipeline:
 @lru_cache(maxsize=1)
 def get_rag_pipeline() -> RagPipeline:
     return RagPipeline()
+
+
+class RagAnswerPipeline:
+    def __init__(
+        self,
+        retriever: RagRetriever | None = None,
+        prompt_builder=None,
+        llm=None,
+    ) -> None:
+        self._retriever = retriever or get_rag_retriever()
+        self._prompt_builder = prompt_builder or get_rag_prompt_builder()
+        self._llm = llm or get_rag_llm()
+
+    def answer_question(self, question: str, top_k: int = 3) -> dict[str, object]:
+        retrieval = self._retriever.retrieve(question, top_k)
+        documents = retrieval["documents"]
+
+        if not documents:
+            return {
+                "answer": "I don't know.",
+                "sources": [],
+                "retrieved_documents": 0,
+            }
+
+        prompt = self._prompt_builder.build(question, documents)
+        answer = self._llm.answer(prompt)
+
+        sources = []
+        for index, document in enumerate(documents, start=1):
+            source_metadata = document.get("metadata", {})
+            sources.append(
+                {
+                    "chunk_number": index,
+                    "metadata": source_metadata,
+                    "distance": document.get("distance"),
+                    "score": document.get("score"),
+                }
+            )
+
+        return {
+            "answer": answer,
+            "sources": sources,
+            "retrieved_documents": len(documents),
+        }
+
+
+@lru_cache(maxsize=1)
+def get_rag_answer_pipeline() -> RagAnswerPipeline:
+    return RagAnswerPipeline()

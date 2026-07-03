@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from backend.api.utils.responses import success_response
-from backend.modules.rag.pipeline import RagPipeline, get_rag_pipeline
+from backend.modules.rag.pipeline import RagAnswerPipeline, RagPipeline, get_rag_answer_pipeline, get_rag_pipeline
 from backend.modules.rag.uploads import save_uploaded_pdf
 from backend.modules.rag.retriever import RagRetriever, get_rag_retriever
 
@@ -14,9 +14,18 @@ class RetrievalRequest(BaseModel):
     top_k: int = Field(default=3, ge=1, le=10)
 
 
-@router.get("/ask")
-def ask() -> dict[str, object]:
-    return success_response("Coming soon")
+class AnswerRequest(BaseModel):
+    question: str = Field(min_length=1, description="Question to answer from the knowledge base")
+    top_k: int = Field(default=3, ge=1, le=10)
+
+
+@router.post("/ask")
+def ask(
+    payload: AnswerRequest,
+    answer_pipeline: RagAnswerPipeline = Depends(get_rag_answer_pipeline),
+) -> dict[str, object]:
+    result = answer_pipeline.answer_question(payload.question, payload.top_k)
+    return success_response("Answer generated", result)
 
 
 @router.post("/upload")
