@@ -26,6 +26,10 @@ This note captures the real-PDF retrieval checks performed on `artificial_intell
    - The search corpus is the full indexed collection, and the retriever returns the 3 nearest chunks.
    - In the experiment, the indexed collection size was `404` chunks at size `300`, `227` chunks at size `500`, and `140` chunks at size `800`.
 
+6. What happens on hallucination tests?
+   - Unrelated questions like `Who invented Facebook?`, `What is quantum computing?`, and `How many moons does Mars have?` return `I don't know.` instead of fabricating an answer.
+   - The answer pipeline also returns the top matching chunks as sources, so you can inspect what the retriever found even when the LLM declines to answer.
+
 ## Measured Results
 
 | Chunk size | Overlap | Chunks | Avg. chunk size | Ingest time | Direct AI query time | Direct AI top score | Synonym query top score |
@@ -37,3 +41,9 @@ This note captures the real-PDF retrieval checks performed on `artificial_intell
 ## Takeaway
 
 For this document, `500` is the best default so far. It keeps retrieval strong while reducing the number of stored chunks compared with `300`. The `800` setting is still usable, but it was not clearly better for relevance.
+
+## Multi-Document Support
+
+- The collection can store chunks from multiple PDFs.
+- Each chunk stores `filename`, `page`, and `chunk_id` metadata.
+- This makes it possible to trace answers back to a specific page in a specific file.

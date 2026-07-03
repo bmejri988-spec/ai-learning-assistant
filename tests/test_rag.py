@@ -145,6 +145,38 @@ def test_rag_pipeline_indexes_pdf_without_llm(tmp_path, monkeypatch) -> None:
     assert result["stored_documents"] == result["chunks"]
 
 
+def test_rag_answer_returns_i_dont_know_for_unrelated_question(tmp_path) -> None:
+    class FakeRetriever:
+        def retrieve(self, query: str, top_k: int = 3):
+            return {
+                "query": query,
+                "top_k": top_k,
+                "documents": [
+                    {
+                        "text": "This chunk is about artificial intelligence.",
+                        "metadata": {"filename": "sample.pdf", "page": 1, "chunk_id": 0},
+                        "distance": 0.8,
+                        "score": 0.2,
+                    }
+                ],
+            }
+
+    class FakeLLM:
+        def answer(self, prompt: str):
+            return "A fabricated answer that should be suppressed."
+
+    from backend.modules.rag.pipeline import RagAnswerPipeline
+
+    pipeline = RagAnswerPipeline(retriever=FakeRetriever(), prompt_builder=None, llm=FakeLLM())
+    result = pipeline.answer_question("Who invented Facebook?", top_k=3)
+
+    assert result["answer"] == "I don't know."
+    assert result["retrieved_documents"] == 1
+    assert result["retrieval_time_ms"] >= 0
+    assert result["llm_time_ms"] >= 0
+    assert result["total_latency_ms"] >= 0
+
+
 def test_rag_route_appears_in_openapi_and_docs() -> None:
     docs_response = client.get("/docs")
     openapi_response = client.get("/openapi.json")
@@ -164,12 +196,15 @@ def test_rag_ask_route_generates_answer(tmp_path) -> None:
                 "sources": [
                     {
                         "chunk_number": 1,
-                        "metadata": {"document_name": "sample.pdf", "chunk_index": 0},
+                        "metadata": {"filename": "sample.pdf", "page": 1, "chunk_id": 0},
                         "distance": 0.12,
                         "score": 0.88,
                     }
                 ],
                 "retrieved_documents": 1,
+                "retrieval_time_ms": 1.2,
+                "llm_time_ms": 2.3,
+                "total_latency_ms": 3.5,
             }
 
     app.dependency_overrides[get_rag_answer_pipeline] = lambda: FakeAnswerPipeline()
@@ -185,3 +220,4 @@ def test_rag_ask_route_generates_answer(tmp_path) -> None:
     assert response.json()["success"] is True
     assert response.json()["data"]["answer"]
     assert response.json()["data"]["sources"][0]["chunk_number"] == 1
+    assert response.json()["data"]["retrieval_time_ms"] >= 0
