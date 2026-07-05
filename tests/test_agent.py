@@ -1,0 +1,272 @@
+from fastapi.testclient import TestClient
+
+from backend.main import app
+from backend.modules.agent.agent import AgentService
+from backend.modules.agent.memory import AgentMemoryStore, ConversationTurn
+from backend.modules.agent.planner import AgentPlanner
+from backend.modules.agent.tools import FlashcardTool, QuizTool, SearchDocumentsTool, SummarizeTool
+from backend.modules.agent.agent import get_agent_service
+
+
+client = TestClient(app)
+
+
+class FakeRagClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+
+    def ask(self, question: str, top_k: int = 3):
+        self.calls.append((question, top_k))
+        return {
+            "answer": "Supervised learning uses labeled data to make predictions.",
+            "sources": [
+                {
+                    "chunk_number": 1,
+                    "metadata": {"filename": "notes.pdf", "page": 1, "chunk_id": 0},
+                    "distance": 0.1,
+                    "score": 0.9,
+                }
+            ],
+            "retrieved_documents": 1,
+            "retrieval_time_ms": 1.0,
+            "llm_time_ms": 2.0,
+            "total_latency_ms": 3.0,
+        }
+
+    def retrieve(self, query: str, top_k: int = 3):
+        self.calls.append((query, top_k))
+        return [
+            {
+                "text": "Supervised learning uses labeled data to make predictions.",
+                "metadata": {"filename": "notes.pdf", "page": 1, "chunk_id": 0},
+                "distance": 0.1,
+                "score": 0.9,
+            },
+            {
+                "text": "A model learns patterns from training examples.",
+                "metadata": {"filename": "notes.pdf", "page": 1, "chunk_id": 1},
+                "distance": 0.2,
+                "score": 0.8,
+            },
+        ]
+
+
+class FakeAgentService:
+    def chat(self, message: str, top_k: int = 3):
+        return {
+            "tool": "quiz",
+            "reason": "Matched quiz keywords",
+            "execution_time_ms": 1.0,
+            "tool_execution_time_ms": 0.5,
+            "result": {
+                "quiz": [
+                    {
+                        "question": "Which term best matches the retrieved notes for question 1?",
+                        "choices": ["supervised", "learning", "distractor_1", "distractor_2"],
+                        "answer": "supervised",
+                    }
+                ],
+                "sources": [],
+                "retrieved_documents": 1,
+            },
+        }
+
+
+def test_planner_selects_quiz_tool() -> None:
+    planner = AgentPlanner()
+
+    decision = planner.select_tool("Create a quiz about supervised learning.")
+
+    assert decision.tool_name == "quiz"
+    assert "quiz" in decision.reason.lower()
+
+
+def test_planner_defaults_to_search_docs() -> None:
+    planner = AgentPlanner()
+
+    decision = planner.select_tool("What does the PDF say about AI?")
+
+    assert decision.tool_name == "search_docs"
+
+
+def test_tools_return_expected_structures() -> None:
+    fake_rag_client = FakeRagClient()
+
+    search_tool = SearchDocumentsTool(fake_rag_client)
+    summarize_tool = SummarizeTool(fake_rag_client)
+    quiz_tool = QuizTool(fake_rag_client)
+    flashcard_tool = FlashcardTool(fake_rag_client)
+
+    search_result = search_tool.run("What is supervised learning?", top_k=3)
+    summarize_result = summarize_tool.run("Summarize supervised learning.", top_k=3)
+    quiz_result = quiz_tool.run("Create a quiz about supervised learning.", top_k=3)
+    flashcard_result = flashcard_tool.run("Create flashcards about supervised learning.", top_k=3)
+
+    assert search_result["answer"]
+    assert search_result["retrieved_documents"] == 1
+    assert summarize_result["summary"]
+    assert summarize_result["retrieved_documents"] == 2
+    assert quiz_result["quiz"]
+    assert quiz_result["retrieved_documents"] == 2
+    assert flashcard_result["flashcards"]
+    assert flashcard_result["retrieved_documents"] == 2
+
+
+def test_agent_chat_route_uses_agent_service() -> None:
+    app.dependency_overrides[get_agent_service] = lambda: FakeAgentService()
+
+    response = client.post(
+        "/agent/chat",
+        json={"message": "Create a quiz about supervised learning.", "top_k": 3},
+    )
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert response.json()["data"]["tool"] == "quiz"
+    assert response.json()["data"]["result"]["quiz"]
+
+
+def test_agent_chat_rejects_empty_message() -> None:
+    response = client.post("/agent/chat", json={"message": "", "top_k": 3})
+
+    assert response.status_code == 422
+
+
+def test_memory_store_remembers_and_recalls() -> None:
+    memory = AgentMemoryStore(max_history=3)
+
+    memory.remember("Summarize chapter 1", "summarize", {"summary": "Chapter 1 is about AI."})
+    memory.remember("Create quiz", "quiz", {"quiz": []})
+
+    history = memory.recall()
+    assert len(history) == 2
+    assert history[0].message == "Summarize chapter 1"
+    assert history[0].tool_name == "summarize"
+    assert history[1].message == "Create quiz"
+    assert history[1].tool_name == "quiz"
+
+
+def test_memory_store_limits_history() -> None:
+    memory = AgentMemoryStore(max_history=2)
+
+    memory.remember("Message 1", "search_docs", {})
+    memory.remember("Message 2", "search_docs", {})
+    memory.remember("Message 3", "search_docs", {})
+
+    history = memory.recall()
+    assert len(history) == 2
+    assert history[0].message == "Message 2"
+    assert history[1].message == "Message 3"
+
+
+def test_memory_store_clear() -> None:
+    memory = AgentMemoryStore()
+    memory.remember("Test", "search_docs", {})
+
+    memory.clear()
+    history = memory.recall()
+    assert len(history) == 0
+
+
+def test_memory_store_recall_with_limit() -> None:
+    memory = AgentMemoryStore()
+    memory.remember("Message 1", "search_docs", {})
+    memory.remember("Message 2", "search_docs", {})
+    memory.remember("Message 3", "search_docs", {})
+
+    history = memory.recall(limit=2)
+    assert len(history) == 2
+    assert history[0].message == "Message 2"
+    assert history[1].message == "Message 3"
+
+
+def test_memory_store_get_conversation_context() -> None:
+    memory = AgentMemoryStore()
+    memory.remember("Summarize chapter 1", "summarize", {"summary": "AI basics"})
+    memory.remember("Create quiz", "quiz", {"quiz": []})
+
+    context = memory.get_conversation_context()
+    assert "User: Summarize chapter 1" in context
+    assert "Tool: summarize" in context
+    assert "User: Create quiz" in context
+    assert "Tool: quiz" in context
+
+
+def test_planner_uses_history_for_context() -> None:
+    planner = AgentPlanner()
+    history = [
+        ConversationTurn(
+            message="Summarize chapter 1",
+            tool_name="summarize",
+            result={"summary": "Chapter 1 is about AI."},
+        )
+    ]
+
+    decision = planner.select_tool("Do it again for chapter 2", history)
+    assert decision.tool_name == "summarize"
+    assert "previous context" in decision.reason.lower()
+
+
+def test_planner_defaults_without_history() -> None:
+    planner = AgentPlanner()
+
+    decision = planner.select_tool("What is AI?")
+    assert decision.tool_name == "search_docs"
+
+
+def test_agent_service_passes_history_to_planner_and_tools() -> None:
+    fake_rag_client = FakeRagClient()
+    tools = {
+        "search_docs": SearchDocumentsTool(fake_rag_client),
+        "summarize": SummarizeTool(fake_rag_client),
+    }
+    memory = AgentMemoryStore()
+    planner = AgentPlanner()
+    agent = AgentService(planner=planner, tools=tools, memory=memory)
+
+    agent.chat("Summarize AI", top_k=3)
+    assert len(memory.recall()) == 1
+
+    agent.chat("Do it again", top_k=3)
+    assert len(memory.recall()) == 2
+
+
+def test_agent_history_endpoint() -> None:
+    fake_rag_client = FakeRagClient()
+    tools = {"search_docs": SearchDocumentsTool(fake_rag_client)}
+    memory = AgentMemoryStore()
+    planner = AgentPlanner()
+    agent = AgentService(planner=planner, tools=tools, memory=memory)
+
+    app.dependency_overrides[get_agent_service] = lambda: agent
+
+    agent.chat("What is AI?", top_k=3)
+
+    response = client.get("/agent/history")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert len(response.json()["data"]["history"]) == 1
+    assert response.json()["data"]["history"][0]["message"] == "What is AI?"
+
+
+def test_agent_clear_history_endpoint() -> None:
+    fake_rag_client = FakeRagClient()
+    tools = {"search_docs": SearchDocumentsTool(fake_rag_client)}
+    memory = AgentMemoryStore()
+    planner = AgentPlanner()
+    agent = AgentService(planner=planner, tools=tools, memory=memory)
+
+    app.dependency_overrides[get_agent_service] = lambda: agent
+
+    agent.chat("What is AI?", top_k=3)
+
+    response = client.delete("/agent/history")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert len(response.json()["data"]["history"]) == 0

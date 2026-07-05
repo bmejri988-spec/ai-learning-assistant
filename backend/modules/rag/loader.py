@@ -3,19 +3,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from langchain_community.document_loaders import PyPDFLoader
+from pypdf import PdfReader
 
 
 def load_pdf_pages(pdf_path: Path) -> list[dict[str, Any]]:
-    loader = PyPDFLoader(str(pdf_path))
-    pages = loader.load()
-    return [
-        {
-            "page_content": page.page_content.strip(),
-            "metadata": dict(page.metadata),
-        }
-        for page in pages
-    ]
+    reader = PdfReader(str(pdf_path))
+    pages = []
+    for page_num, page in enumerate(reader.pages):
+        pages.append(
+            {
+                "page_content": page.extract_text().strip(),
+                "metadata": {"page": page_num, "source": str(pdf_path)},
+            }
+        )
+    return pages
 
 
 def load_pdf_text(pdf_path: Path) -> str:
