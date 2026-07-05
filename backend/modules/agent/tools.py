@@ -11,8 +11,8 @@ from urllib import error, request
 from fastapi import HTTPException
 
 from backend.config import RAG_API_BASE_URL
+from backend.modules.agent.llm import get_agent_llm
 from backend.modules.agent.schemas import ToolSpec
-from backend.modules.rag.llm import get_rag_llm
 
 if TYPE_CHECKING:
     from backend.modules.agent.memory import ConversationTurn
@@ -196,7 +196,7 @@ class SummarizeTool(AgentTool):
         return " ".join(document.get("text", "") for document in documents if document.get("text"))
 
     def _generate_summary_with_llm(self, message: str, text: str) -> str:
-        llm = get_rag_llm()
+        llm = get_agent_llm()
         
         prompt = f"""Create a concise summary of the following text based on the user's request.
 
@@ -264,7 +264,7 @@ class QuizTool(AgentTool):
         return " ".join(document.get("text", "") for document in documents if document.get("text"))
 
     def _generate_quiz_with_llm(self, message: str, text: str) -> list[dict[str, Any]]:
-        llm = get_rag_llm()
+        llm = get_agent_llm()
         
         prompt = f"""Create 3 multiple-choice questions based on the following text.
 
@@ -384,7 +384,7 @@ class FlashcardTool(AgentTool):
         return " ".join(document.get("text", "") for document in documents if document.get("text"))
 
     def _generate_flashcards_with_llm(self, message: str, text: str) -> list[dict[str, Any]]:
-        llm = get_rag_llm()
+        llm = get_agent_llm()
         
         prompt = f"""Create 5 high-quality question-answer flashcards based on the following text.
 

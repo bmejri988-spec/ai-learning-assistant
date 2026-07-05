@@ -4,9 +4,9 @@ import json
 import re
 from typing import TYPE_CHECKING
 
+from backend.modules.agent.llm import get_agent_llm
 from backend.modules.agent.planner import BasePlanner
 from backend.modules.agent.schemas import PlanDecision
-from backend.modules.rag.llm import get_rag_llm
 
 if TYPE_CHECKING:
     from backend.modules.agent.memory import ConversationTurn
