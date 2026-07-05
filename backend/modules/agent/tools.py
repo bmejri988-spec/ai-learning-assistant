@@ -12,6 +12,7 @@ from fastapi import HTTPException
 
 from backend.config import RAG_API_BASE_URL
 from backend.modules.agent.schemas import ToolSpec
+from backend.modules.rag.llm import get_rag_llm
 
 if TYPE_CHECKING:
     from backend.modules.agent.memory import ConversationTurn
@@ -183,7 +184,8 @@ class SummarizeTool(AgentTool):
             return {"summary": "I don't know.", "sources": [], "retrieved_documents": 0}
 
         combined_text = self._combine_text(documents)
-        summary = self._short_summary(combined_text)
+        summary = self._generate_summary_with_llm(message, combined_text)
+
         return {
             "summary": summary,
             "sources": self._build_sources(documents),
@@ -193,7 +195,25 @@ class SummarizeTool(AgentTool):
     def _combine_text(self, documents: list[dict[str, Any]]) -> str:
         return " ".join(document.get("text", "") for document in documents if document.get("text"))
 
-    def _short_summary(self, text: str) -> str:
+    def _generate_summary_with_llm(self, message: str, text: str) -> str:
+        llm = get_rag_llm()
+        
+        prompt = f"""Create a concise summary of the following text based on the user's request.
+
+User request: {message}
+
+Text:
+{text}
+
+Provide a clear, well-structured summary that captures the main points."""
+
+        try:
+            response = llm.answer(prompt)
+            return response.strip() if response else self._fallback_summary(text)
+        except Exception:
+            return self._fallback_summary(text)
+
+    def _fallback_summary(self, text: str) -> str:
         sentences = self._split_sentences(text)
         if not sentences:
             return "I don't know."
@@ -231,7 +251,70 @@ class QuizTool(AgentTool):
         if not documents:
             return {"quiz": [], "sources": [], "retrieved_documents": 0}
 
-        topics = self._extract_topics(documents)
+        combined_text = self._combine_text(documents)
+        quiz = self._generate_quiz_with_llm(message, combined_text)
+
+        return {
+            "quiz": quiz,
+            "sources": self._build_sources(documents),
+            "retrieved_documents": len(documents),
+        }
+
+    def _combine_text(self, documents: list[dict[str, Any]]) -> str:
+        return " ".join(document.get("text", "") for document in documents if document.get("text"))
+
+    def _generate_quiz_with_llm(self, message: str, text: str) -> list[dict[str, Any]]:
+        llm = get_rag_llm()
+        
+        prompt = f"""Create 3 multiple-choice questions based on the following text.
+
+User request: {message}
+
+Text:
+{text}
+
+Return ONLY a JSON array with this format:
+[
+  {{
+    "question": "question text",
+    "choices": ["option1", "option2", "option3", "option4"],
+    "answer": "correct option"
+  }}
+]
+
+Make questions challenging but fair based on the provided text."""
+
+        try:
+            response = llm.answer(prompt)
+            return self._parse_quiz_response(response)
+        except Exception:
+            return self._fallback_quiz(text)
+
+    def _parse_quiz_response(self, response: str) -> list[dict[str, Any]]:
+        json_match = re.search(r'\[.*\]', response, re.DOTALL)
+        if not json_match:
+            return []
+        
+        try:
+            quiz_data = json.loads(json_match.group())
+            if not isinstance(quiz_data, list):
+                return []
+            
+            validated_quiz = []
+            for item in quiz_data[:3]:
+                if isinstance(item, dict) and "question" in item and "choices" in item and "answer" in item:
+                    validated_quiz.append({
+                        "question": item["question"],
+                        "choices": item["choices"],
+                        "answer": item["answer"]
+                    })
+            
+            return validated_quiz
+        except json.JSONDecodeError:
+            return []
+
+    def _fallback_quiz(self, text: str) -> list[dict[str, Any]]:
+        topics = self._extract_topics_from_text(text)
         quiz = []
         for index in range(min(3, len(topics))):
             correct = topics[index]
@@ -243,20 +326,14 @@ class QuizTool(AgentTool):
                     "answer": correct,
                 }
             )
+        return quiz
 
-        return {
-            "quiz": quiz,
-            "sources": self._build_sources(documents),
-            "retrieved_documents": len(documents),
-        }
-
-    def _extract_topics(self, documents: list[dict[str, Any]]) -> list[str]:
+    def _extract_topics_from_text(self, text: str) -> list[str]:
         words = []
-        for document in documents:
-            for token in re.findall(r"[A-Za-z][A-Za-z\-]{4,}", document.get("text", "")):
-                lowered = token.lower()
-                if lowered not in STOPWORDS and lowered not in words:
-                    words.append(lowered)
+        for token in re.findall(r"[A-Za-z][A-Za-z\-]{4,}", text):
+            lowered = token.lower()
+            if lowered not in STOPWORDS and lowered not in words:
+                words.append(lowered)
         if not words:
             words = ["concept", "topic", "idea"]
         return words[:6]
@@ -294,23 +371,79 @@ class FlashcardTool(AgentTool):
         if not documents:
             return {"flashcards": [], "sources": [], "retrieved_documents": 0}
 
-        flashcards = []
-        for index, document in enumerate(documents[:5], start=1):
-            text = self._first_sentence(document.get("text", ""))
-            if not text:
-                continue
-            flashcards.append(
-                {
-                    "front": f"What is the key idea in chunk {index}?",
-                    "back": text,
-                }
-            )
+        combined_text = self._combine_text(documents)
+        flashcards = self._generate_flashcards_with_llm(message, combined_text)
 
         return {
             "flashcards": flashcards,
             "sources": self._build_sources(documents),
             "retrieved_documents": len(documents),
         }
+
+    def _combine_text(self, documents: list[dict[str, Any]]) -> str:
+        return " ".join(document.get("text", "") for document in documents if document.get("text"))
+
+    def _generate_flashcards_with_llm(self, message: str, text: str) -> list[dict[str, Any]]:
+        llm = get_rag_llm()
+        
+        prompt = f"""Create 5 high-quality question-answer flashcards based on the following text.
+
+User request: {message}
+
+Text:
+{text}
+
+Return ONLY a JSON array with this format:
+[
+  {{
+    "front": "question",
+    "back": "answer"
+  }}
+]
+
+Make questions clear and answers concise but comprehensive based on the provided text."""
+
+        try:
+            response = llm.answer(prompt)
+            return self._parse_flashcard_response(response)
+        except Exception:
+            return self._fallback_flashcards_from_text(text)
+
+    def _parse_flashcard_response(self, response: str) -> list[dict[str, Any]]:
+        json_match = re.search(r'\[.*\]', response, re.DOTALL)
+        if not json_match:
+            return []
+        
+        try:
+            flashcard_data = json.loads(json_match.group())
+            if not isinstance(flashcard_data, list):
+                return []
+            
+            validated_flashcards = []
+            for item in flashcard_data[:5]:
+                if isinstance(item, dict) and "front" in item and "back" in item:
+                    validated_flashcards.append({
+                        "front": item["front"],
+                        "back": item["back"]
+                    })
+            
+            return validated_flashcards
+        except json.JSONDecodeError:
+            return []
+
+    def _fallback_flashcards_from_text(self, text: str) -> list[dict[str, Any]]:
+        sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+        flashcards = []
+        for index, sentence in enumerate(sentences[:5], start=1):
+            if not sentence.strip():
+                continue
+            flashcards.append(
+                {
+                    "front": f"What is the key idea in point {index}?",
+                    "back": sentence.strip(),
+                }
+            )
+        return flashcards
 
     def _first_sentence(self, text: str) -> str:
         sentence = re.split(r"(?<=[.!?])\s+", text.strip())[0:1]

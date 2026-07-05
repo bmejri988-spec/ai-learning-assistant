@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from backend.modules.agent.schemas import PlanDecision
@@ -8,7 +9,13 @@ if TYPE_CHECKING:
     from backend.modules.agent.memory import ConversationTurn
 
 
-class AgentPlanner:
+class BasePlanner(ABC):
+    @abstractmethod
+    def select_tool(self, message: str, history: list[ConversationTurn] | None = None) -> PlanDecision:
+        pass
+
+
+class AgentPlanner(BasePlanner):
     def select_tool(self, message: str, history: list[ConversationTurn] | None = None) -> PlanDecision:
         normalized_message = message.lower()
         

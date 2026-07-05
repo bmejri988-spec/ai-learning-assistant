@@ -5,8 +5,9 @@ import time
 from functools import lru_cache
 from typing import Any
 
+from backend.config import AGENT_PLANNER_TYPE
 from backend.modules.agent.memory import AgentMemoryStore
-from backend.modules.agent.planner import AgentPlanner
+from backend.modules.agent.planner import AgentPlanner, BasePlanner
 from backend.modules.agent.tools import AgentTool, build_default_tools
 
 logger = logging.getLogger(__name__)
@@ -15,13 +16,21 @@ logger = logging.getLogger(__name__)
 class AgentService:
     def __init__(
         self,
-        planner: AgentPlanner | None = None,
+        planner: BasePlanner | None = None,
         tools: dict[str, AgentTool] | None = None,
         memory: AgentMemoryStore | None = None,
     ) -> None:
-        self._planner = planner or AgentPlanner()
+        if planner is None:
+            planner = self._create_planner()
+        self._planner = planner
         self._tools = tools or build_default_tools()
         self._memory = memory or AgentMemoryStore()
+
+    def _create_planner(self) -> BasePlanner:
+        if AGENT_PLANNER_TYPE == "llm":
+            from backend.modules.agent.llm_planner import LLMPlanner
+            return LLMPlanner()
+        return AgentPlanner()
 
     def chat(self, message: str, top_k: int = 3) -> dict[str, Any]:
         start_time = time.perf_counter()

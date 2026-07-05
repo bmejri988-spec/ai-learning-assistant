@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from backend.main import app
 from backend.modules.agent.agent import AgentService
 from backend.modules.agent.memory import AgentMemoryStore, ConversationTurn
-from backend.modules.agent.planner import AgentPlanner
+from backend.modules.agent.planner import AgentPlanner, BasePlanner
 from backend.modules.agent.tools import FlashcardTool, QuizTool, SearchDocumentsTool, SummarizeTool
 from backend.modules.agent.agent import get_agent_service
 
@@ -270,3 +270,65 @@ def test_agent_clear_history_endpoint() -> None:
     assert response.status_code == 200
     assert response.json()["success"] is True
     assert len(response.json()["data"]["history"]) == 0
+
+
+def test_planner_interface_is_abstract() -> None:
+    from backend.modules.agent.planner import BasePlanner
+    
+    assert hasattr(BasePlanner, 'select_tool')
+    assert hasattr(BasePlanner, '__abstractmethods__')
+
+
+def test_agent_service_accepts_base_planner() -> None:
+    fake_rag_client = FakeRagClient()
+    tools = {"search_docs": SearchDocumentsTool(fake_rag_client)}
+    memory = AgentMemoryStore()
+    planner = AgentPlanner()
+    
+    agent = AgentService(planner=planner, tools=tools, memory=memory)
+    result = agent.chat("What is AI?", top_k=3)
+    
+    assert result["tool"] == "search_docs"
+    assert len(memory.recall()) == 1
+
+
+def test_llm_planner_defaults_on_parse_failure() -> None:
+    from backend.modules.agent.llm_planner import LLMPlanner
+    from unittest.mock import Mock
+    
+    planner = LLMPlanner()
+    planner._llm = Mock()
+    planner._llm.answer = Mock(return_value="invalid response without json")
+    
+    decision = planner.select_tool("Create a quiz")
+    
+    assert decision.tool_name == "search_docs"
+    assert "defaulted" in decision.reason.lower()
+
+
+def test_llm_planner_defaults_on_llm_failure() -> None:
+    from backend.modules.agent.llm_planner import LLMPlanner
+    from unittest.mock import Mock
+    
+    planner = LLMPlanner()
+    planner._llm = Mock()
+    planner._llm.answer = Mock(side_effect=Exception("LLM failed"))
+    
+    decision = planner.select_tool("Create a quiz")
+    
+    assert decision.tool_name == "search_docs"
+    assert "failed" in decision.reason.lower()
+
+
+def test_llm_planner_validates_tool_name() -> None:
+    from backend.modules.agent.llm_planner import LLMPlanner
+    from unittest.mock import Mock
+    
+    planner = LLMPlanner()
+    planner._llm = Mock()
+    planner._llm.answer = Mock(return_value='{"tool": "invalid_tool", "reason": "test"}')
+    
+    decision = planner.select_tool("Create a quiz")
+    
+    assert decision.tool_name == "search_docs"
+    assert "invalid" in decision.reason.lower()
