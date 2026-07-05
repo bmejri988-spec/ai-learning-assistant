@@ -90,6 +90,8 @@ def test_planner_defaults_to_search_docs() -> None:
 
 
 def test_tools_return_expected_structures() -> None:
+    from unittest.mock import patch
+    
     fake_rag_client = FakeRagClient()
 
     search_tool = SearchDocumentsTool(fake_rag_client)
@@ -98,9 +100,18 @@ def test_tools_return_expected_structures() -> None:
     flashcard_tool = FlashcardTool(fake_rag_client)
 
     search_result = search_tool.run("What is supervised learning?", top_k=3)
-    summarize_result = summarize_tool.run("Summarize supervised learning.", top_k=3)
-    quiz_result = quiz_tool.run("Create a quiz about supervised learning.", top_k=3)
-    flashcard_result = flashcard_tool.run("Create flashcards about supervised learning.", top_k=3)
+    
+    with patch('backend.modules.agent.tools.get_agent_llm') as mock_llm:
+        mock_llm.return_value.answer.return_value = "This is a summary of supervised learning."
+        summarize_result = summarize_tool.run("Summarize supervised learning.", top_k=3)
+    
+    with patch('backend.modules.agent.tools.get_agent_llm') as mock_llm:
+        mock_llm.return_value.answer.return_value = '[{"question": "Test question", "choices": ["A", "B", "C", "D"], "answer": "A"}]'
+        quiz_result = quiz_tool.run("Create a quiz about supervised learning.", top_k=3)
+    
+    with patch('backend.modules.agent.tools.get_agent_llm') as mock_llm:
+        mock_llm.return_value.answer.return_value = '[{"front": "Test question", "back": "Test answer"}]'
+        flashcard_result = flashcard_tool.run("Create flashcards about supervised learning.", top_k=3)
 
     assert search_result["answer"]
     assert search_result["retrieved_documents"] == 1
@@ -217,6 +228,8 @@ def test_planner_defaults_without_history() -> None:
 
 
 def test_agent_service_passes_history_to_planner_and_tools() -> None:
+    from unittest.mock import patch
+    
     fake_rag_client = FakeRagClient()
     tools = {
         "search_docs": SearchDocumentsTool(fake_rag_client),
@@ -226,11 +239,13 @@ def test_agent_service_passes_history_to_planner_and_tools() -> None:
     planner = AgentPlanner()
     agent = AgentService(planner=planner, tools=tools, memory=memory)
 
-    agent.chat("Summarize AI", top_k=3)
-    assert len(memory.recall()) == 1
+    with patch('backend.modules.agent.tools.get_agent_llm') as mock_llm:
+        mock_llm.return_value.answer.return_value = "Summary of AI"
+        agent.chat("Summarize AI", top_k=3)
+        assert len(memory.recall()) == 1
 
-    agent.chat("Do it again", top_k=3)
-    assert len(memory.recall()) == 2
+        agent.chat("Do it again", top_k=3)
+        assert len(memory.recall()) == 2
 
 
 def test_agent_history_endpoint() -> None:

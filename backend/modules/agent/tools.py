@@ -17,76 +17,6 @@ from backend.modules.agent.schemas import ToolSpec
 if TYPE_CHECKING:
     from backend.modules.agent.memory import ConversationTurn
 
-STOPWORDS = {
-    "the",
-    "and",
-    "for",
-    "with",
-    "that",
-    "this",
-    "from",
-    "into",
-    "what",
-    "when",
-    "where",
-    "how",
-    "why",
-    "which",
-    "about",
-    "your",
-    "have",
-    "will",
-    "been",
-    "their",
-    "there",
-    "into",
-    "only",
-    "using",
-    "used",
-    "use",
-    "are",
-    "was",
-    "were",
-    "can",
-    "could",
-    "should",
-    "would",
-    "than",
-    "then",
-    "also",
-    "not",
-    "does",
-    "did",
-    "has",
-    "had",
-    "but",
-    "you",
-    "our",
-    "they",
-    "them",
-    "his",
-    "her",
-    "its",
-    "who",
-    "whom",
-    "is",
-    "a",
-    "an",
-    "of",
-    "to",
-    "in",
-    "on",
-    "at",
-    "by",
-    "as",
-    "or",
-    "it",
-    "be",
-    "do",
-    "me",
-    "my",
-}
-
 
 class RagApiClient:
     def __init__(self, base_url: str | None = None, opener=None) -> None:
@@ -207,22 +137,8 @@ Text:
 
 Provide a clear, well-structured summary that captures the main points."""
 
-        try:
-            response = llm.answer(prompt)
-            return response.strip() if response else self._fallback_summary(text)
-        except Exception:
-            return self._fallback_summary(text)
-
-    def _fallback_summary(self, text: str) -> str:
-        sentences = self._split_sentences(text)
-        if not sentences:
-            return "I don't know."
-        selected = sentences[:3]
-        return " ".join(selected)
-
-    def _split_sentences(self, text: str) -> list[str]:
-        parts = re.split(r"(?<=[.!?])\s+", text.strip())
-        return [part.strip() for part in parts if part.strip()]
+        response = llm.answer(prompt)
+        return response.strip() if response else ""
 
     def _build_sources(self, documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [
@@ -284,11 +200,8 @@ Return ONLY a JSON array with this format:
 
 Make questions challenging but fair based on the provided text."""
 
-        try:
-            response = llm.answer(prompt)
-            return self._parse_quiz_response(response)
-        except Exception:
-            return self._fallback_quiz(text)
+        response = llm.answer(prompt)
+        return self._parse_quiz_response(response)
 
     def _parse_quiz_response(self, response: str) -> list[dict[str, Any]]:
         json_match = re.search(r'\[.*\]', response, re.DOTALL)
@@ -312,37 +225,6 @@ Make questions challenging but fair based on the provided text."""
             return validated_quiz
         except json.JSONDecodeError:
             return []
-
-    def _fallback_quiz(self, text: str) -> list[dict[str, Any]]:
-        topics = self._extract_topics_from_text(text)
-        quiz = []
-        for index in range(min(3, len(topics))):
-            correct = topics[index]
-            distractors = self._distractors(topics, correct)
-            quiz.append(
-                {
-                    "question": f"Which term best matches the retrieved notes for question {index + 1}?",
-                    "choices": [correct, *distractors],
-                    "answer": correct,
-                }
-            )
-        return quiz
-
-    def _extract_topics_from_text(self, text: str) -> list[str]:
-        words = []
-        for token in re.findall(r"[A-Za-z][A-Za-z\-]{4,}", text):
-            lowered = token.lower()
-            if lowered not in STOPWORDS and lowered not in words:
-                words.append(lowered)
-        if not words:
-            words = ["concept", "topic", "idea"]
-        return words[:6]
-
-    def _distractors(self, topics: list[str], correct: str) -> list[str]:
-        options = [topic for topic in topics if topic != correct]
-        while len(options) < 3:
-            options.append(f"distractor_{len(options) + 1}")
-        return options[:3]
 
     def _build_sources(self, documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [
@@ -403,11 +285,8 @@ Return ONLY a JSON array with this format:
 
 Make questions clear and answers concise but comprehensive based on the provided text."""
 
-        try:
-            response = llm.answer(prompt)
-            return self._parse_flashcard_response(response)
-        except Exception:
-            return self._fallback_flashcards_from_text(text)
+        response = llm.answer(prompt)
+        return self._parse_flashcard_response(response)
 
     def _parse_flashcard_response(self, response: str) -> list[dict[str, Any]]:
         json_match = re.search(r'\[.*\]', response, re.DOTALL)
@@ -430,24 +309,6 @@ Make questions clear and answers concise but comprehensive based on the provided
             return validated_flashcards
         except json.JSONDecodeError:
             return []
-
-    def _fallback_flashcards_from_text(self, text: str) -> list[dict[str, Any]]:
-        sentences = re.split(r"(?<=[.!?])\s+", text.strip())
-        flashcards = []
-        for index, sentence in enumerate(sentences[:5], start=1):
-            if not sentence.strip():
-                continue
-            flashcards.append(
-                {
-                    "front": f"What is the key idea in point {index}?",
-                    "back": sentence.strip(),
-                }
-            )
-        return flashcards
-
-    def _first_sentence(self, text: str) -> str:
-        sentence = re.split(r"(?<=[.!?])\s+", text.strip())[0:1]
-        return sentence[0].strip() if sentence else text.strip()
 
     def _build_sources(self, documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [

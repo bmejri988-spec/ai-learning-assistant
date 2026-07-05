@@ -28,7 +28,7 @@ class AgentLLM:
         )
 
         try:
-            with request.urlopen(http_request, timeout=120) as response:
+            with request.urlopen(http_request, timeout=180) as response:
                 response_payload = json.loads(response.read().decode("utf-8"))
         except error.URLError as exc:
             raise HTTPException(
