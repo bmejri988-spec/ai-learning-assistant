@@ -7,28 +7,29 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
+from backend.config import RAG_MIN_RELEVANCE_SCORE
 from backend.modules.rag.embeddings import get_embedding_model
 from backend.modules.rag.loader import load_pdf_pages
 from backend.modules.rag.llm import get_rag_llm
 from backend.modules.rag.prompt import get_rag_prompt_builder
-from backend.modules.rag.retriever import (
-    RagRetriever,
-    get_rag_retriever,
-)
+from backend.modules.rag.retriever import RagRetriever, get_rag_retriever
 from backend.modules.rag.splitter import split_text
 from backend.modules.rag.vectordb import get_collection
 
 
 class RagPipeline:
-    """Pipeline responsible for indexing PDF documents."""
+    def extract_text(self, pdf_path: Path) -> str:
+        pages = load_pdf_pages(pdf_path)
+        return "\n".join(
+            page["page_content"]
+            for page in pages
+            if page["page_content"]
+        ).strip()
 
     def chunk_text(self, text: str):
         return split_text(text)
 
-    def embed_chunks(self, chunks: list[str]) -> list[list[float]]:
-        if not chunks:
-            return []
-
+    def embed_chunks(self, chunks: list[str]):
         return get_embedding_model().embed_documents(chunks)
 
     def store_chunks(
@@ -37,15 +38,8 @@ class RagPipeline:
         page_number: int,
         chunks: list[str],
         embeddings: list[list[float]],
+        start_chunk_index: int = 0,
     ) -> int:
-        if len(chunks) != len(embeddings):
-            raise ValueError(
-                "The number of chunks must match the number of embeddings"
-            )
-
-        if not chunks:
-            return 0
-
         collection = get_collection()
 
         ids = [
@@ -60,9 +54,9 @@ class RagPipeline:
 
         metadatas = [
             {
-                "filename": document_name,
+                "document_name": document_name,
                 "page": page_number,
-                "chunk_id": index,
+                "chunk_index": start_chunk_index + index,
             }
             for index in range(len(chunks))
         ]
@@ -74,12 +68,18 @@ class RagPipeline:
             metadatas=metadatas,
         )
 
-        return len(chunks)
+        return collection.count()
 
     def index_pdf(self, pdf_path: Path) -> dict[str, object]:
         pages = load_pdf_pages(pdf_path)
 
-        if not pages:
+        readable_pages = [
+            page
+            for page in pages
+            if page.get("page_content", "").strip()
+        ]
+
+        if not readable_pages:
             raise HTTPException(
                 status_code=400,
                 detail="The PDF does not contain readable text",
@@ -88,17 +88,14 @@ class RagPipeline:
         total_chunks = 0
         total_embeddings = 0
         total_text_length = 0
-        embedding_dimension = 0
+        collection_count = 0
+        global_chunk_index = 0
 
-        for page in pages:
-            page_text = page.get("page_content", "").strip()
-
-            if not page_text:
-                continue
-
-            page_number = (
-                int(page.get("metadata", {}).get("page", 0)) + 1
-            )
+        for page in readable_pages:
+            page_text = page["page_content"]
+            page_number = int(
+                page.get("metadata", {}).get("page", 0)
+            ) + 1
 
             split_result = self.chunk_text(page_text)
 
@@ -107,30 +104,30 @@ class RagPipeline:
 
             embeddings = self.embed_chunks(split_result.chunks)
 
-            if embeddings and embedding_dimension == 0:
-                embedding_dimension = len(embeddings[0])
-
-            stored_count = self.store_chunks(
+            collection_count = self.store_chunks(
                 document_name=pdf_path.name,
                 page_number=page_number,
                 chunks=split_result.chunks,
                 embeddings=embeddings,
+                start_chunk_index=global_chunk_index,
             )
 
+            global_chunk_index += split_result.count
             total_chunks += split_result.count
             total_embeddings += len(embeddings)
             total_text_length += len(page_text)
-
-            if stored_count != len(split_result.chunks):
-                raise RuntimeError(
-                    "Not all chunks were stored successfully"
-                )
 
         if total_chunks == 0:
             raise HTTPException(
                 status_code=400,
                 detail="The PDF does not contain readable text",
             )
+
+        embedding_dim = (
+            len(embeddings[0])
+            if total_embeddings > 0 and embeddings
+            else 0
+        )
 
         return {
             "document_name": pdf_path.name,
@@ -140,9 +137,9 @@ class RagPipeline:
                 total_text_length / total_chunks,
                 2,
             ),
-            "embedding_dimension": embedding_dimension,
+            "embedding_dimension": embedding_dim,
             "vector_count": total_embeddings,
-            "stored_documents": total_chunks,
+            "stored_documents": collection_count,
         }
 
 
@@ -152,8 +149,6 @@ def get_rag_pipeline() -> RagPipeline:
 
 
 class RagAnswerPipeline:
-    """Pipeline responsible for answering questions using RAG."""
-
     def __init__(
         self,
         retriever: RagRetriever | None = None,
@@ -166,43 +161,29 @@ class RagAnswerPipeline:
         )
         self._llm = llm or get_rag_llm()
 
-    def _has_relevant_context(
+    def _build_sources(
         self,
         documents: list[dict[str, object]],
-    ) -> bool:
-        if not documents:
-            return False
+    ) -> list[dict[str, object]]:
+        sources = []
 
-        scores = [
-            float(document.get("score", 0.0))
-            for document in documents
-            if document.get("score") is not None
-        ]
+        for index, document in enumerate(documents, start=1):
+            sources.append(
+                {
+                    "chunk_number": index,
+                    "metadata": document.get("metadata", {}),
+                    "distance": document.get("distance"),
+                    "score": document.get("score"),
+                }
+            )
 
-        if not scores:
-            return False
-
-        return max(scores) >= 0.35
+        return sources
 
     def answer_question(
         self,
         question: str,
         top_k: int = 3,
     ) -> dict[str, object]:
-        question = question.strip()
-
-        if not question:
-            raise HTTPException(
-                status_code=400,
-                detail="Question cannot be empty",
-            )
-
-        if top_k <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail="top_k must be greater than zero",
-            )
-
         start_time = time.perf_counter()
 
         retrieval = self._retriever.retrieve(
@@ -210,10 +191,14 @@ class RagAnswerPipeline:
             top_k,
         )
 
-        documents = retrieval.get("documents", [])
+        documents = retrieval.get("documents", []) or []
 
         retrieval_seconds = time.perf_counter() - start_time
 
+        retrieved_documents = len(documents)
+        sources = self._build_sources(documents)
+
+        # Nothing was retrieved.
         if not documents:
             return {
                 "answer": "I don't know.",
@@ -230,11 +215,20 @@ class RagAnswerPipeline:
                 ),
             }
 
-        if not self._has_relevant_context(documents):
+        # Reject weak retrieval before calling the LLM.
+        scores = [
+            float(document.get("score", 0.0))
+            for document in documents
+            if document.get("score") is not None
+        ]
+
+        best_score = max(scores, default=0.0)
+
+        if best_score < RAG_MIN_RELEVANCE_SCORE:
             return {
                 "answer": "I don't know.",
-                "sources": [],
-                "retrieved_documents": len(documents),
+                "sources": sources,
+                "retrieved_documents": retrieved_documents,
                 "retrieval_time_ms": round(
                     retrieval_seconds * 1000,
                     2,
@@ -246,6 +240,7 @@ class RagAnswerPipeline:
                 ),
             }
 
+        # Build grounded prompt.
         prompt = self._prompt_builder.build(
             question,
             documents,
@@ -253,43 +248,17 @@ class RagAnswerPipeline:
 
         llm_start = time.perf_counter()
 
-        answer = self._llm.answer(prompt).strip()
+        answer = self._llm.answer(prompt)
 
         llm_seconds = time.perf_counter() - llm_start
 
-        if not answer:
+        if not answer.strip():
             answer = "I don't know."
 
-        sources = []
-
-        for index, document in enumerate(
-            documents,
-            start=1,
-        ):
-            sources.append(
-                {
-                    "chunk_number": index,
-                    "metadata": document.get(
-                        "metadata",
-                        {},
-                    ),
-                    "distance": document.get(
-                        "distance",
-                    ),
-                    "score": document.get(
-                        "score",
-                    ),
-                }
-            )
-
-        total_seconds = (
-            retrieval_seconds + llm_seconds
-        )
-
         return {
-            "answer": answer,
+            "answer": answer.strip(),
             "sources": sources,
-            "retrieved_documents": len(documents),
+            "retrieved_documents": retrieved_documents,
             "retrieval_time_ms": round(
                 retrieval_seconds * 1000,
                 2,
@@ -299,7 +268,7 @@ class RagAnswerPipeline:
                 2,
             ),
             "total_latency_ms": round(
-                total_seconds * 1000,
+                (retrieval_seconds + llm_seconds) * 1000,
                 2,
             ),
         }
