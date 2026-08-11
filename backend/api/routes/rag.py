@@ -42,7 +42,7 @@ async def upload_pdf(
     return success_response(
         "PDF uploaded and indexed",
         {
-            "file_name": saved_path.name,
+            "file_name": file.filename,
             "saved_path": str(saved_path),
             **index_result,
         },
