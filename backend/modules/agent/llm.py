@@ -30,6 +30,11 @@ class AgentLLM:
         try:
             with request.urlopen(http_request, timeout=180) as response:
                 response_payload = json.loads(response.read().decode("utf-8"))
+        except TimeoutError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Ollama timed out at {OLLAMA_BASE_URL}. Try a smaller prompt or a lighter model.",
+            ) from exc
         except error.URLError as exc:
             raise HTTPException(
                 status_code=503,

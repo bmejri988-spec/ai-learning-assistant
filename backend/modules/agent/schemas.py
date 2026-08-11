@@ -23,3 +23,4 @@ class ToolSpec:
 class PlanDecision:
     tool_name: Literal["search_docs", "summarize", "quiz", "flashcards"]
     reason: str
+    confidence: float | None = None

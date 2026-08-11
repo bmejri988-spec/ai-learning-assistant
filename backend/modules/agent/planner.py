@@ -25,19 +25,20 @@ class AgentPlanner(BasePlanner):
             context = last_turn.message.lower()
 
         if any(keyword in normalized_message for keyword in ["quiz", "multiple choice", "mcq"]):
-            return PlanDecision(tool_name="quiz", reason="Matched quiz keywords")
+            return PlanDecision(tool_name="quiz", reason="Matched quiz keywords", confidence=1.0)
 
         if any(keyword in normalized_message for keyword in ["flashcard", "flash cards", "flash cards", "cards"]):
-            return PlanDecision(tool_name="flashcards", reason="Matched flashcard keywords")
+            return PlanDecision(tool_name="flashcards", reason="Matched flashcard keywords", confidence=1.0)
 
         if any(keyword in normalized_message for keyword in ["summarize", "summary", "summarise"]):
-            return PlanDecision(tool_name="summarize", reason="Matched summarize keywords")
+            return PlanDecision(tool_name="summarize", reason="Matched summarize keywords", confidence=1.0)
 
         if context and any(ref in normalized_message for ref in ["it", "that", "the above", "this", "them"]):
             if history and history[-1].tool_name in ["summarize", "quiz", "flashcards"]:
                 return PlanDecision(
                     tool_name=history[-1].tool_name,
-                    reason=f"Referenced previous context with tool {history[-1].tool_name}"
+                    reason=f"Referenced previous context with tool {history[-1].tool_name}",
+                    confidence=0.9,
                 )
 
-        return PlanDecision(tool_name="search_docs", reason="Defaulted to document search")
+        return PlanDecision(tool_name="search_docs", reason="Defaulted to document search", confidence=0.6)

@@ -42,7 +42,7 @@ def test_placeholder_routes_return_standard_response() -> None:
     assert response.status_code == 200
     assert response.json()["success"] is True
 
-    for path in ["/agent/chat", "/image/predict", "/text/predict", "/ml/predict"]:
+    for path in ["/image/predict", "/text/predict", "/ml/predict"]:
         response = client.get(path)
 
         assert response.status_code == 200

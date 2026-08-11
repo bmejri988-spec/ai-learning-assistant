@@ -6,6 +6,7 @@ from functools import lru_cache
 from typing import Any
 
 from backend.config import AGENT_PLANNER_TYPE
+from backend.modules.agent.hybrid_planner import HybridPlanner
 from backend.modules.agent.memory import AgentMemoryStore
 from backend.modules.agent.planner import AgentPlanner, BasePlanner
 from backend.modules.agent.tools import AgentTool, build_default_tools
@@ -30,6 +31,8 @@ class AgentService:
         if AGENT_PLANNER_TYPE == "llm":
             from backend.modules.agent.llm_planner import LLMPlanner
             return LLMPlanner()
+        if AGENT_PLANNER_TYPE == "hybrid":
+            return HybridPlanner()
         return AgentPlanner()
 
     def chat(self, message: str, top_k: int = 3) -> dict[str, Any]:
@@ -57,6 +60,7 @@ class AgentService:
                 "reason": decision.reason,
                 "execution_time_ms": round(total_seconds * 1000, 2),
                 "tool_execution_time_ms": round(tool_seconds * 1000, 2),
+                "thinking": self._build_thinking(decision, result, total_seconds, tool_seconds),
                 "result": result,
             }
         except Exception:
@@ -69,6 +73,32 @@ class AgentService:
                 False,
             )
             raise
+
+    def _build_thinking(
+        self,
+        decision,
+        result: dict[str, Any],
+        total_seconds: float,
+        tool_seconds: float,
+    ) -> dict[str, Any]:
+        generation_mode = result.get("generation_mode", "unknown")
+        generation_reason = result.get("generation_reason", "Not provided by tool")
+
+        return {
+            "planner": {
+                "selected_tool": decision.tool_name,
+                "reason": decision.reason,
+                "confidence": decision.confidence,
+            },
+            "generation": {
+                "mode": generation_mode,
+                "reason": generation_reason,
+            },
+            "timing": {
+                "total_ms": round(total_seconds * 1000, 2),
+                "tool_ms": round(tool_seconds * 1000, 2),
+            },
+        }
 
 
 @lru_cache(maxsize=1)

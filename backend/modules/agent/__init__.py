@@ -1,4 +1,5 @@
 from backend.modules.agent.agent import AgentService, get_agent_service
+from backend.modules.agent.hybrid_planner import HybridPlanner
 from backend.modules.agent.memory import AgentMemoryStore
 from backend.modules.agent.planner import AgentPlanner
 from backend.modules.agent.schemas import AgentChatRequest, PlanDecision, ToolSpec
@@ -6,6 +7,7 @@ from backend.modules.agent.tools import AgentTool, FlashcardTool, QuizTool, RagA
 
 __all__ = [
     "AgentService",
+    "HybridPlanner",
     "AgentMemoryStore",
     "AgentPlanner",
     "AgentChatRequest",

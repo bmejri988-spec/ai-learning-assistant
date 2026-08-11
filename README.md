@@ -8,6 +8,7 @@ Step 1 scaffold for the AI Learning Assistant project.
 - RAG ingestion pipeline for PDF upload, text extraction, chunking, embeddings, and Chroma storage
 - Retrieval engine with `/rag/retrieve`
 - Answer generation with Ollama `llama3.2:3b`
+- Deterministic agent layer with `/agent/chat` that routes through RAG as a tool
 - Retrieval study with real PDF measurements in [docs/rag-retrieval-study.md](docs/rag-retrieval-study.md)
 
 ## RAG Notes
@@ -23,33 +24,34 @@ Step 1 scaffold for the AI Learning Assistant project.
 
 ```json
 {
-	"success": true,
-	"message": "Answer generated",
-	"data": {
-		"answer": "...",
-		"sources": [
-			{
-				"chunk_number": 1,
-				"metadata": {
-					"filename": "artificial_intelligence_tutorial.pdf",
-					"page": 24,
-					"chunk_id": 0
-				},
-				"distance": 0.31,
-				"score": 0.69
-			}
-		],
-		"retrieved_documents": 3,
-		"retrieval_time_ms": 12.5,
-		"llm_time_ms": 840.2,
-		"total_latency_ms": 852.7
-	}
+  "success": true,
+  "message": "Answer generated",
+  "data": {
+    "answer": "...",
+    "sources": [
+      {
+        "chunk_number": 1,
+        "metadata": {
+          "filename": "artificial_intelligence_tutorial.pdf",
+          "page": 24,
+          "chunk_id": 0
+        },
+        "distance": 0.31,
+        "score": 0.69
+      }
+    ],
+    "retrieved_documents": 3,
+    "retrieval_time_ms": 12.5,
+    "llm_time_ms": 840.2,
+    "total_latency_ms": 852.7
+  }
 }
 ```
 
 ## Current Limitations
 
 - The app still depends on a local Ollama server for answer generation.
+- The agent layer uses the RAG API as a separate HTTP dependency, so the backend must be running before `/agent/chat` can be used.
 - LangChain emits a deprecation warning that is tracked in GitHub issue #1.
 - Scanned PDFs without selectable text will not index well without OCR.
 
@@ -59,7 +61,8 @@ Step 1 scaffold for the AI Learning Assistant project.
 2. Open `http://localhost:8000/docs`.
 3. Use `POST /rag/upload` to upload a real PDF.
 4. Call `POST /rag/retrieve` with a real query from that document.
-5. Run `uv run pytest` to verify the ingestion and retrieval pipeline still works.
+5. Use `POST /agent/chat` to ask for a search, summary, quiz, or flashcards.
+6. Run `uv run pytest` to verify the ingestion, retrieval, and agent pipelines still work.
 
 ## Run the backend
 
